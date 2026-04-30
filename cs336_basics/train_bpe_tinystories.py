@@ -1,5 +1,6 @@
 import regex as re
 import os
+import time
 from collections import defaultdict
 
 INIT_SIZE = 256
@@ -44,10 +45,14 @@ class BPE_Trainer():
 
         # 2. Pre-Tokenization
         text_pattern = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+        stime_read_file = time.perf_counter()
         blocks = self._chunk_documents_streaming(path=input_path) # Read the text content
+        etime_read_file = time.perf_counter()
+        print(f"Time cost of reading documents: {etime_read_file - stime_read_file}")
 
         pre_tokenize_count = defaultdict()         # word -> frequency
         pre_tokenize_encodings = defaultdict()     # word -> UTF-8 encoding
+        stime_pre_tokenize = time.perf_counter()
         for i, block in enumerate(blocks):
             # Split the block via the "special_token"
             block_pattern = "|".join(re.escape(token) for token in special_tokens)
@@ -58,14 +63,20 @@ class BPE_Trainer():
                         pre_tokenize_count[match.group(0)] = 1
                     else:
                         pre_tokenize_count[match.group(0)] += 1
+        etime_pre_tokenize = time.perf_counter()
+        print(f"Time cost of Pre-Tokenization: {etime_pre_tokenize - stime_pre_tokenize}")
 
         for word in pre_tokenize_count.keys():
             pre_tokenize_encodings[word] = list(word.encode("utf-8"))
 
         # 3. Compute BPE merges
         merges = []
+        time_byte_pair_count = 0
+        time_byte_pair_max = 0
+        time_update_vocab = 0
         while size < vocab_size:
             # Construct byte pairs and count
+            stime = time.perf_counter()
             byte_pairs_counts = defaultdict()
             for word, count in pre_tokenize_count.items():
                 encoding = pre_tokenize_encodings[word]
@@ -75,10 +86,17 @@ class BPE_Trainer():
                         byte_pairs_counts[byte_pair] = count
                     else:
                         byte_pairs_counts[byte_pair] += count
+            etime = time.perf_counter()
+            time_byte_pair_count += etime - stime
+
             if len(byte_pairs_counts) == 0:
                 break
+
             # Select the byte pair with the highest frequency
+            stime = time.perf_counter()
             byte_pair_max, max_count = max(byte_pairs_counts.items(), key=lambda x: (x[1], (vocab[x[0][0]], vocab[x[0][1]])))
+            etime = time.perf_counter()
+            time_byte_pair_max += etime - stime
 
             # Merge into the initial vocab
             merged_bytes = vocab[byte_pair_max[0]] + vocab[byte_pair_max[1]]
@@ -88,6 +106,7 @@ class BPE_Trainer():
             size += 1
 
             # Update the encodings of the pre-tokenized vocab
+            stime = time.perf_counter()
             for word, encoding in pre_tokenize_encodings.items():
                 new_encoding = []
                 index = 0
@@ -102,7 +121,12 @@ class BPE_Trainer():
                         index += 1
                 if has_new_token:
                     pre_tokenize_encodings[word] = new_encoding
+            etime = time.perf_counter()
+            time_update_vocab += etime - stime
 
+        print(f"Time cost of Byte-Pair Counting: {time_byte_pair_count}")
+        print(f"Time cost of Finding the Byte-Pair with Highest Frequencies: {time_byte_pair_max}")
+        print(f"Time cost of Updating Vocab: {time_update_vocab}")
         return vocab, merges
 
     @staticmethod
@@ -151,7 +175,7 @@ class BPE_Trainer():
 if __name__ == "__main__":
     trainer = BPE_Trainer()
     vocab, merges = trainer.run_train_bpe(
-        input_path="/Users/weixin/Desktop/assignment1-basics/data/TinyStoriesV2-GPT4-train.txt",
+        input_path="/Users/weixin/Desktop/assignment-basics/tests/fixtures/corpus.en",
         vocab_size=500,
         special_tokens=["<|endoftext|>"]
     )
