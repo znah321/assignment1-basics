@@ -591,5 +591,5 @@ def run_train_bpe(
     """
     from cs336_basics.train_bpe_tinystories import BPE_Trainer
     trainer = BPE_Trainer()
-    vocab, merges = trainer.run_train_bpe(input_path, vocab_size, special_tokens, **kwargs)
+    vocab, merges = trainer.run_train_bpe_increment(input_path, vocab_size, special_tokens, **kwargs)
     return vocab, merges
