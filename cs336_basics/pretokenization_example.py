@@ -1,6 +1,10 @@
 import os
 from typing import BinaryIO
 
+from collections import Counter
+import regex as re
+from multiprocessing import Pool
+import time
 
 def find_chunk_boundaries(
     file: BinaryIO,
@@ -48,15 +52,53 @@ def find_chunk_boundaries(
     # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
     return sorted(set(chunk_boundaries))
 
-
-## Usage
-with open(..., "rb") as f:
-    num_processes = 4
-    boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
-
-    # The following is a serial implementation, but you can parallelize this
-    # by sending each start/end pair to a set of processes.
-    for start, end in zip(boundaries[:-1], boundaries[1:]):
+def process_chunk(args):
+    input_path, start, end, special_tokens = args
+    with open(input_path, "rb") as f:
         f.seek(start)
         chunk = f.read(end - start).decode("utf-8", errors="ignore")
-        # Run pre-tokenization on your chunk and store the counts for each pre-token
+
+    # Pre-Tokenization
+    text_pattern = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    block_pattern = "|".join(re.escape(token) for token in special_tokens)
+
+    pre_tokenize_count = Counter()  # word -> frequency
+    texts = re.split(block_pattern, chunk)
+    for text in texts:
+        for match in re.finditer(text_pattern, text):
+            pre_tokenize_count[match.group(0)] += 1
+
+    return pre_tokenize_count
+
+
+if __name__ == "__main__":
+    input_path = "/Users/weixin/Desktop/assignment-basics/data/TinyStoriesV2-GPT4-train.txt"
+    special_tokens = ["<|endoftext|>"]
+
+    ## Usage
+    stime = time.perf_counter()
+    tasks = []
+    with open(input_path, "rb") as f:
+        num_processes = 10
+        boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
+
+        # Each session open the file by itself
+        for start, end in zip(boundaries[:-1], boundaries[1:]):
+            tasks.append((input_path, start, end, special_tokens))
+
+    with Pool(processes=num_processes) as pool:
+        results = pool.map(process_chunk, tasks)
+
+    total = Counter()
+    for c in results:
+        total.update(c)
+
+    print(total.most_common(10))
+    etime = time.perf_counter()
+    print(f"Time cost of Parallel Pre-Tokenization: {etime - stime}")
+        # # The following is a serial implementation, but you can parallelize this
+        # # by sending each start/end pair to a set of processes.
+        # for start, end in zip(boundaries[:-1], boundaries[1:]):
+        #     f.seek(start)
+        #     chunk = f.read(end - start).decode("utf-8", errors="ignore")
+        #     # Run pre-tokenization on your chunk and store the counts for each pre-token
